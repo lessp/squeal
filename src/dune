@@ -1,0 +1,3 @@
+(library
+ (name squeal)
+ (libraries str postgresql))

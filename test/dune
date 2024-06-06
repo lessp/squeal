@@ -1,0 +1,4 @@
+(test
+ (name test_squeal)
+ (libraries squeal alcotest ppx_expect)
+ (preprocess (pps ppx_expect)))

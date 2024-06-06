@@ -1,0 +1,3 @@
+(executable
+ (name example)
+ (libraries squeal sqlite3 postgresql pgocaml lwt lwt.unix))
