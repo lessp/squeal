@@ -1,34 +1,35 @@
+open Lwt.Syntax
+
+let get_users db =
+  let* rows = Squeal.(query "select * from users" [] db) in
+
+  match rows with
+  | Ok rows ->
+    let users =
+      rows
+      |> List.map (function
+        | [ id; title ] -> Some (id, title)
+        | _ -> None)
+      |> List.filter_map Fun.id
+    in
+    Lwt.return users
+  | Error _ -> Lwt.return []
+;;
+
+let get_user db id =
+  let* row = Squeal.(query_one "select * from users where id = $1" [ int id ] db) in
+
+  match row with
+  | Ok (Some [ id; title ]) -> Lwt.return (Ok (id, title))
+  | Ok _ -> Lwt.return (Error "Invalid row")
+  | Error _ -> Lwt.return (Error "User not found")
+;;
+
 let () =
-  (* let _query = *)
-  (*   Squeal.(create "select * from users where id = :id" ~params:[] |> bind ":id" (int 1)) *)
-  (* in *)
+  let db = Squeal.connect_with_uri "postgresql://" |> Result.get_ok in
 
-  (* Db.run () *)
-  let connection =
-    Squeal.Postgres.connect
-      ~host:"aws-0-eu-central-1.pooler.supabase.com"
-      ~port:6543
-      ~database:"postgres"
-      ~user:"postgres.qxtisvutbpzztrccgziy"
-      ~password:"cZ5t(d2_3@Jhvtf"
-      ()
-    |> Result.get_ok
-  in
+  let _users = get_users db in
+  let _user = get_user db 1 in
 
-  let query = Squeal.(create "select * from articles" ~params:[]) in
-
-  let result = Squeal.Postgres.exec connection query |> Result.get_ok in
-
-  result#get_all_lst
-  |> List.iter (fun row ->
-    match row with
-    | [] -> ()
-    | [ id; created_at; title; content ] ->
-      Printf.printf
-        "id: %s, created_at: %s, title: %s, content: %s\n"
-        id
-        created_at
-        title
-        content
-    | _ -> ())
+  ()
 ;;

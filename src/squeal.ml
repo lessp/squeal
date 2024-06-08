@@ -15,7 +15,7 @@ end
 
 type t =
   { query : string
-  ; params : (string * Value.t) list
+  ; params : Value.t list
   }
 
 let int x = Value.Int x
@@ -23,70 +23,96 @@ let float x = Value.Float x
 let bool x = Value.Bool x
 let string x = Value.String x
 
-let create query ~params = { query; params }
-
-let bind name value t = { t with params = (name, value) :: t.params }
+let create query params = { query; params }
 
 let to_string { query; params } =
-  List.fold_left
-    (fun query (name, value) ->
-      (* Replace all occurrences of the parameter name with the value *)
-      Str.global_replace (Str.regexp (Str.quote name)) (Value.to_string value) query)
-    query
-    params
+  (* Replace all $1 with the first parameter, $2 with the second, etc. *)
+  let query =
+    List.fold_left
+      (fun query (i, value) ->
+        Str.global_replace
+          (Str.regexp ("\\$" ^ string_of_int i))
+          (Value.to_string value)
+          query)
+      query
+      (List.mapi (fun i value -> i + 1, value) params)
+  in
+
+  query
 ;;
 
 module Postgres = struct
   type connection = Postgresql.connection
   type error = Postgresql.error
 
-  let connect ?host ?port ?user ?password ?database () =
-    let host = Option.value host ~default:"localhost" in
-    let port = Option.value port ~default:5432 |> Int.to_string in
-    let user = Option.value user ~default:"postgres" in
-    let password = Option.value password ~default:"" in
-    let database = Option.value database ~default:"postgres" in
-
+  let connect ?host ?port ?database ?user ?password () =
     try
-      Ok (new Postgresql.connection ~host ~port ~user ~password ~dbname:database ())
+      Ok
+        (new Postgresql.connection
+           ~host:(Option.value host ~default:"")
+           ~port:(Option.value port ~default:"")
+           ~dbname:(Option.value database ~default:"")
+           ~user:(Option.value user ~default:"")
+           ~password:(Option.value password ~default:"")
+           ())
     with
-    | Postgresql.Error e -> Error e
+    | Postgresql.Error e ->
+      print_endline (Postgresql.string_of_error e);
+      Error e
+  ;;
+
+  let connect_with_uri uri =
+    try Ok (new Postgresql.connection ~conninfo:uri ()) with
+    | Postgresql.Error e ->
+      print_endline (Postgresql.string_of_error e);
+      Error e
   ;;
 
   let close connection = Ok connection#finish
 
-  let exec (connection : Postgresql.connection) sql =
+  let exec sql (connection : Postgresql.connection) =
     match sql.params with
     | [] ->
       (* No parameters, just execute the query *)
       let query = to_string sql in
 
       (try Ok (connection#exec query) with
-       | Postgresql.Error e -> Error e)
+       | Postgresql.Error e ->
+         print_endline (Postgresql.string_of_error e);
+         Error e)
     | _ ->
-      (* Parameters, prepare the query and bind them *)
-      let params =
-        sql.params
-        |> List.map (fun (_name, value) -> Value.to_string value)
-        |> Array.of_list
-      in
+      let params = sql.params |> List.map Value.to_string |> Array.of_list in
 
-      (try Ok (connection#exec_prepared sql.query ~params) with
-       | Postgresql.Error e -> Error e)
+      (try Ok (connection#exec sql.query ~params) with
+       | Postgresql.Error e ->
+         print_endline (Postgresql.string_of_error e);
+         Error e)
   ;;
 end
 
-(* module type Database = sig *)
-(*   type connection *)
-(*   type error = string *)
+type connection = Postgres.connection
+type database_error = Postgres.error
 
-(*   val connect : string -> (connection, error) result *)
-(*   val close : connection -> (unit, error) result *)
-(*   val exec : t -> ('ok, error) result *)
-(* end *)
+let connect_with_uri uri = Postgres.connect_with_uri uri
 
-(* let exec (module Db : Database) (sql : t) = *)
-(*   match Db.exec sql with *)
-(*   | Ok _ -> Ok () *)
-(*   | Error e -> Error e *)
-(* ;; *)
+let connect ?host ?port ?database ?user ?password () =
+  Postgres.connect ?host ?port ?database ?user ?password ()
+;;
+
+let close = Postgres.close
+
+let query q params connection =
+  let sql = create q params in
+  Lwt.return
+    (match Postgres.exec sql connection with
+     | Ok result -> Ok result#get_all_lst
+     | Error e -> Error e)
+;;
+
+let query_one q params connection =
+  query q params connection
+  |> Lwt.map (fun result ->
+    Result.bind result (function
+      | [ row ] | row :: _ -> Ok (Some row)
+      | [] -> Ok None))
+;;

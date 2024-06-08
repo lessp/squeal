@@ -31,31 +31,7 @@ val bool : bool -> Value.t
 
       Database.exec query
     ]} *)
-val create : string -> params:(string * Value.t) list -> t
-
-(** [bind query name value] binds a value to a named parameter in a query.
-
-    {[
-      let query =
-        Squeal.(create "select * from users where id = :id")
-        |> Squeal.(bind ":id" (int id))
-      in
-
-      Database.exec query
-    ]}
-
-    Or, bind multiple values to the same query.
-
-    {[
-      let query = Squeal.(create "select * from users where id = :id") in
-
-      let query = Squeal.(bind query ":id" (int 1)) in
-      Database.exec query;
-
-      let query = Squeal.(bind query ":id" (int 2)) in
-      Database.exec query
-    ]} *)
-val bind : string -> Value.t -> t -> t
+val create : string -> Value.t list -> t
 
 (** [to_string query] returns the SQL query as a string.
 
@@ -68,53 +44,30 @@ val bind : string -> Value.t -> t -> t
     ]} *)
 val to_string : t -> string
 
-module Postgres : sig
-  type connection
-  type error
+type connection
+type database_error
 
-  val connect
-    :  ?host:string
-    -> ?port:int
-    -> ?user:string
-    -> ?password:string
-    -> ?database:string
-    -> unit
-    -> (connection, error) result
+val connect
+  :  ?host:string
+  -> ?port:string
+  -> ?database:string
+  -> ?user:string
+  -> ?password:string
+  -> unit
+  -> (connection, database_error) result
 
-  val close : connection -> (unit, error) result
+val connect_with_uri : string -> (connection, database_error) result
 
-  val exec : connection -> t -> (Postgresql.result, error) result
-end
+val close : connection -> (unit, database_error) result
 
-(*module type Database = sig *)
-(*  type connection *)
-(*  type error = string *)
+val query
+  :  string
+  -> Value.t list
+  -> connection
+  -> (string list list, database_error) result Lwt.t
 
-(*  val connect : string -> (connection, error) result *)
-(*  val close : connection -> (unit, error) result *)
-(*  val exec : t -> ('ok, error) result *)
-(*end *)
-
-(*(1** [execute query] executes a prepared query. *)
-
-(*    {[ *)
-(*      Squeal.(execute query) *)
-(*    ]} *1) *)
-(*val exec : (module Database) -> t -> (unit, string) result *)
-
-(*(1** [Make] is a functor that takes a database implementation and returns a module *)
-(*    that provides a simple API for building and executing SQL queries. *)
-
-(*    {[ *)
-(*      module Postgres = struct *)
-(*        type t = Postgres.t *)
-(*        type error = Postgres.error *)
-
-(*        let connect = Postgres.connect *)
-(*        let close = Postgres.close *)
-(*        let exec = Postgres.exec *)
-(*      end *)
-
-(*      module Squeal = Squeal.Make (Postgres) *)
-(*    ]} *1) *)
-(*module Make : functor (_ : Database) -> S *)
+val query_one
+  :  string
+  -> Value.t list
+  -> connection
+  -> (string list option, database_error) result Lwt.t
